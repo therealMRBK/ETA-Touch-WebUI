@@ -1,11 +1,10 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AppConfig, HeatingVariable, LogEntry, HistoryData } from './types';
 import { DEFAULT_CONFIG, STORAGE_KEYS } from './constants';
 import { apiService } from './services/apiService';
 import Overview from './components/Overview';
 import Settings from './components/Settings';
-// Fix: Added FlameIcon to the icons import
 import { SettingsIcon, RefreshIcon, FlameIcon } from './components/Icons';
 
 const App: React.FC = () => {
@@ -28,7 +27,6 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryData[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.HISTORY);
     if (saved) return JSON.parse(saved);
-    // Initial dummy history
     return Array.from({ length: 24 }).map((_, i) => ({
       time: `${i}:00`,
       temp: 50 + Math.random() * 20
@@ -38,7 +36,31 @@ const App: React.FC = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
 
+  // Listen for storage events in case an external "Dienst" updates the data
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEYS.DATA && e.newValue) {
+        try {
+          const newData = JSON.parse(e.newValue);
+          setData(newData);
+          setLastUpdate(new Date().toLocaleTimeString());
+          apiService.addLog("Daten von externem Dienst empfangen", 'success');
+        } catch (err) {
+          console.error("Failed to parse external data update", err);
+        }
+      }
+      if (e.key === STORAGE_KEYS.LOGS && e.newValue) {
+        setLogs(JSON.parse(e.newValue));
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   const updateData = useCallback(async (currentConfig: AppConfig) => {
+    // If we're using mock data, we act as the "Dienst" ourselves
+    // If not, this logic still provides the baseline functionality
     setIsUpdating(true);
     const newLogs = apiService.addLog("Starte Datenabruf...", 'info');
     setLogs(newLogs);
@@ -47,7 +69,6 @@ const App: React.FC = () => {
       const vars = currentConfig.variables;
       const results: Record<string, HeatingVariable> = {};
       
-      // Fetch all variables sequentially or in parallel
       const fetchPromises = Object.entries(vars).map(async ([key, uri]) => {
         const val = await apiService.fetchVariable(currentConfig, uri);
         results[key] = val;
@@ -61,7 +82,6 @@ const App: React.FC = () => {
       const updateTime = new Date().toLocaleTimeString();
       setLastUpdate(updateTime);
       
-      // Update History with KesselTemp
       const kesselTemp = parseFloat(results.kesselTemp?.strValue) || 0;
       setHistory(prev => {
         const newEntry = { time: updateTime.split(':').slice(0, 2).join(':'), temp: kesselTemp };
@@ -78,7 +98,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Polling logic
   useEffect(() => {
     updateData(config);
     const interval = setInterval(() => {
@@ -86,8 +105,7 @@ const App: React.FC = () => {
     }, config.refreshInterval * 1000);
 
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.refreshInterval, config.baseUrl, config.useMockData]);
+  }, [config.refreshInterval, config.baseUrl, config.useMockData, updateData]);
 
   const handleSaveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
@@ -103,7 +121,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#f8f9fa] pb-12">
-      {/* Header */}
       <header className="bg-white border-b border-gray-100 sticky top-0 z-30 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <div className="bg-orange-500 p-2 rounded-xl shadow-lg shadow-orange-200">
@@ -138,13 +155,9 @@ const App: React.FC = () => {
              <SettingsIcon className="w-5 h-5" />
            </button>
         </div>
-
-        {/* Mobile menu button could go here */}
       </header>
 
-      {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-6 pt-8">
-        {/* Navigation Tabs */}
         <div className="flex space-x-1 bg-gray-100 p-1 rounded-2xl w-fit mb-8">
           <button 
             onClick={() => setView('overview')}
@@ -172,7 +185,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Footer / Credits */}
       <footer className="mt-20 text-center text-gray-300 text-[10px] uppercase font-bold tracking-[0.2em]">
         &copy; {new Date().getFullYear()} Heizungsmonitor v1.2 &bull; ETA Touch Webservices
       </footer>

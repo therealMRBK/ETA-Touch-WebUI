@@ -2,7 +2,7 @@
 import { AppConfig } from './types';
 
 export const DEFAULT_CONFIG: AppConfig = {
-  baseUrl: 'https://pc.bravokilo.cloud',
+  baseUrl: 'https://pellets.bravokilo.cloud',
   refreshInterval: 60,
   useMockData: true, // Default to true for demo if API is unreachable
   variables: {
