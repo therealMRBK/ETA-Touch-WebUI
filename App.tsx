@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppConfig, HeatingVariable, LogEntry, HistoryData } from './types';
 import { DEFAULT_CONFIG, STORAGE_KEYS } from './constants';
 import { apiService } from './services/apiService';
@@ -35,35 +35,46 @@ const App: React.FC = () => {
 
   const [isUpdating, setIsUpdating] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string>('--:--:--');
+  
+  // BroadcastChannel als moderne Alternative zu WebSockets für Cross-Tab Synchronisation
+  const syncChannel = useRef<BroadcastChannel | null>(null);
 
-  // Listen for storage events in case an external "Dienst" updates the data
   useEffect(() => {
+    // Initialisierung des Broadcast-Kanals (KEINE WebSockets, nutzt Browser-Interne Kommunikation)
+    syncChannel.current = new BroadcastChannel('eta_data_sync');
+    
+    syncChannel.current.onmessage = (event) => {
+      if (event.data.type === 'DATA_UPDATE') {
+        setData(event.data.payload);
+        setLastUpdate(new Date().toLocaleTimeString());
+        apiService.addLog("Daten via BroadcastChannel empfangen", 'success');
+      }
+    };
+
+    // Zusätzlicher Listener für localStorage (falls Broadcast nicht unterstützt oder Tab inaktiv)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === STORAGE_KEYS.DATA && e.newValue) {
         try {
           const newData = JSON.parse(e.newValue);
           setData(newData);
           setLastUpdate(new Date().toLocaleTimeString());
-          apiService.addLog("Daten von externem Dienst empfangen", 'success');
+          apiService.addLog("Daten via Storage-Event synchronisiert", 'info');
         } catch (err) {
-          console.error("Failed to parse external data update", err);
+          console.error("Storage Sync Error", err);
         }
-      }
-      if (e.key === STORAGE_KEYS.LOGS && e.newValue) {
-        setLogs(JSON.parse(e.newValue));
       }
     };
 
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    return () => {
+      syncChannel.current?.close();
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   const updateData = useCallback(async (currentConfig: AppConfig) => {
-    // If we're using mock data, we act as the "Dienst" ourselves
-    // If not, this logic still provides the baseline functionality
     setIsUpdating(true);
-    const newLogs = apiService.addLog("Starte Datenabruf...", 'info');
-    setLogs(newLogs);
+    setLogs(apiService.addLog("HTTP GET Polling gestartet...", 'info'));
 
     try {
       const vars = currentConfig.variables;
@@ -76,8 +87,12 @@ const App: React.FC = () => {
 
       await Promise.all(fetchPromises);
       
+      // Local Storage Update (Caching)
       setData(results);
       localStorage.setItem(STORAGE_KEYS.DATA, JSON.stringify(results));
+      
+      // Broadcast an andere Tabs senden (Alternative zu Sockets)
+      syncChannel.current?.postMessage({ type: 'DATA_UPDATE', payload: results });
       
       const updateTime = new Date().toLocaleTimeString();
       setLastUpdate(updateTime);
@@ -90,14 +105,15 @@ const App: React.FC = () => {
         return updated;
       });
 
-      setLogs(apiService.addLog("Daten erfolgreich aktualisiert", 'success'));
+      setLogs(apiService.addLog("REST API Poll erfolgreich", 'success'));
     } catch (err: any) {
-      setLogs(apiService.addLog(`Fehler beim Abruf: ${err.message}`, 'error'));
+      setLogs(apiService.addLog(`Poll fehlgeschlagen: ${err.message}`, 'error'));
     } finally {
       setIsUpdating(false);
     }
   }, []);
 
+  // Rein Zeitbasiertes Polling (HTTP-Status 200)
   useEffect(() => {
     updateData(config);
     const interval = setInterval(() => {
@@ -110,7 +126,7 @@ const App: React.FC = () => {
   const handleSaveConfig = (newConfig: AppConfig) => {
     setConfig(newConfig);
     localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(newConfig));
-    setLogs(apiService.addLog("Konfiguration gespeichert", 'info'));
+    setLogs(apiService.addLog("Konfiguration aktualisiert", 'info'));
     setView('overview');
   };
 
@@ -128,23 +144,24 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="text-xl font-black text-gray-800 tracking-tight">Heizungsmonitor</h1>
-            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">ETA Heizungssteuerung</p>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">HTTP-Polling & Broadcast Sync</p>
           </div>
         </div>
 
         <div className="hidden md:flex items-center space-x-8">
            <div className="flex items-center space-x-2">
-             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-             <span className="text-xs font-bold text-gray-500 uppercase">Online</span>
+             <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+             <span className="text-xs font-bold text-gray-500 uppercase">REST-Service Aktiv</span>
            </div>
            <div className="text-right">
-              <p className="text-[10px] text-gray-400 font-bold uppercase">Zuletzt aktualisiert</p>
+              <p className="text-[10px] text-gray-400 font-bold uppercase">Letzter Poll</p>
               <p className="text-sm font-bold text-gray-700">{lastUpdate}</p>
            </div>
            <button 
             onClick={() => updateData(config)}
             disabled={isUpdating}
             className={`p-2 rounded-xl hover:bg-gray-50 transition-colors ${isUpdating ? 'animate-spin' : ''}`}
+            title="Manueller HTTP-Refresh"
            >
              <RefreshIcon className="text-gray-400 w-5 h-5" />
            </button>
@@ -163,13 +180,13 @@ const App: React.FC = () => {
             onClick={() => setView('overview')}
             className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${view === 'overview' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
           >
-            Übersicht
+            Dashboard
           </button>
           <button 
             onClick={() => setView('settings')}
             className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${view === 'settings' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
           >
-            Konfiguration
+            System & Logs
           </button>
         </div>
 
@@ -186,7 +203,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="mt-20 text-center text-gray-300 text-[10px] uppercase font-bold tracking-[0.2em]">
-        &copy; {new Date().getFullYear()} Heizungsmonitor v1.2 &bull; ETA Touch Webservices
+        &copy; {new Date().getFullYear()} ETA Monitor &bull; Pure HTTP/REST Implementation &bull; No WebSockets
       </footer>
       
       <style>{`
