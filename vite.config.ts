@@ -4,24 +4,23 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   server: {
     port: 8080,
-    host: true, // Erlaubt Zugriff von außen (0.0.0.0)
-    hmr: false, // Deaktiviert Hot Module Replacement (WebSockets)
-    watch: {
-      usePolling: true, // Nutzt Dateisystem-Polling statt Native Watcher (falls nötig)
-    },
+    host: true,
+    hmr: false,
     allowedHosts: [
       'pellets.bravokilo.cloud',
       'pc.bravokilo.cloud'
     ]
   },
-  // Verhindert, dass Vite versucht, WebSocket-Code in den Client zu injizieren
+  plugins: [
+    {
+      name: 'remove-vite-client',
+      transformIndexHtml(html) {
+        // Entfernt das injizierte Vite-Client-Script, das für WebSockets verantwortlich ist
+        return html.replace(/<script type="module" src="\/@vite\/client"><\/script>/g, '');
+      }
+    }
+  ],
   optimizeDeps: {
     disabled: true
-  },
-  build: {
-    // Falls wir eine Production-Build machen, stellen wir sicher, dass kein Socket-Code enthalten ist
-    commonjsOptions: {
-      include: []
-    }
   }
 });
