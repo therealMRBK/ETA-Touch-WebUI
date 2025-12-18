@@ -1,5 +1,5 @@
 {
-  "name": "ETA Heizungsmonitor",
-  "description": "Ein modernes Dashboard zur Überwachung von ETA Heizsystemen via RESTful API mit Daten-Caching und detaillierten Statistiken.",
+  "name": "ETA Core Dashboard",
+  "description": "Statische, hochmoderne UI zur Heizungsüberwachung mit entkoppeltem REST-Service.",
   "requestFramePermissions": []
 }
